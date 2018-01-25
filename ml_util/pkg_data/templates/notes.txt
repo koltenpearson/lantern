@@ -1,0 +1,5 @@
+#GENERATED remove this line once modified
+
+#These are notes pertaining to the models specific state
+#that should be filled in before it is archived, kind of
+#like a message that goes with a commit to a VCS

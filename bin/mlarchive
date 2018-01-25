@@ -1,0 +1,51 @@
+#! /usr/bin/env python
+
+import argparse
+from ml_util.structures import MetaExperiment
+
+def init_exp(args) :
+    MetaExperiment.init_experiment(args.path)
+
+def store_model(args) :
+    m = MetaExperiment(args.path)
+    m.store()
+
+def retrieve_model(args) :
+    m = MetaExperiment(args.path)
+    m.retrieve(args.store_id)
+
+def list_model(args) :
+    m = MetaExperiment(args.path)
+    models, loaded = m.get_archive_description()
+    print("")
+    for k in models :
+        description = models[k][0]
+
+        if (loaded == k) :
+            print(f'\t{k}*\t{description}')
+        else : 
+            print(f'\t{k}\t{description}')
+    print("")
+
+parser = argparse.ArgumentParser("tool for managing experiments")
+sub_add = parser.add_subparsers()
+
+init_parser = sub_add.add_parser('init', help="make an experiment archivable") 
+init_parser.add_argument('path', help='where to create the archive', default='.', nargs='?')
+init_parser.set_defaults(func=init_exp)
+
+store_parser = sub_add.add_parser('store', help='store model')
+store_parser.add_argument('path', help='model root to store', default='.', nargs='?')
+store_parser.set_defaults(func=store_model)
+
+retrieve_parser = sub_add.add_parser('retrieve', help='store model', aliases=['ret'])
+retrieve_parser.add_argument("store_id", help="id of model to restore")
+retrieve_parser.add_argument('path', help='model root to work from', default='.', nargs='?')
+retrieve_parser.set_defaults(func=retrieve_model)
+
+list_parser = sub_add.add_parser('list', help='list stored models')
+list_parser.add_argument('path', help='model root to work from', default='.', nargs='?')
+list_parser.set_defaults(func=list_model)
+
+args = parser.parse_args()
+args.func(args)
