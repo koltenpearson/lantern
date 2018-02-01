@@ -1,0 +1,17 @@
+
+body {
+    display : flex;
+    align-items : flex-start;
+}
+
+.directory {
+    /*background-color : #AAAAAA;*/
+    padding : 0.5em;
+}
+
+#log-div {
+    padding : 3em;
+    max-height : 75%;
+    width : 100%;
+    overflow : auto;
+}

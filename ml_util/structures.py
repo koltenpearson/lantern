@@ -28,6 +28,28 @@ def read_note(notepath) :
         cleaned.append(r)
     return cleaned
 
+
+class ModelStructure :
+    pass
+
+    def __init__(self, root) :
+        self.root = Path(root)
+
+    def get_run_ids(self) :
+        return [int(d.parts[-1]) for d in (self.root/RUN_DIR).iterdir()]
+
+    def get_log(self, run_id) :
+        return LogReader(self.root/RUN_DIR/str(run_id)/LOG_NAME)
+
+
+class Model :
+    pass
+
+class ModelArchiver :
+    pass
+
+
+
 #defines operations on the experiment file structure
 class MetaExperiment :
 
@@ -50,6 +72,7 @@ class MetaExperiment :
         if not self.archive_dir.exists() :
             raise FileNotFoundError
 
+    #XXX info
     def get_archive_description(self) :
         result = {}
         loaded_id = None
@@ -61,6 +84,7 @@ class MetaExperiment :
                 loaded_id = store_id
         return result, loaded_id
 
+    #XXX info
     def get_store_id(self) :
         store_id = 0
         for p in self.archive_dir.iterdir() :
@@ -72,6 +96,7 @@ class MetaExperiment :
 
         return store_id + 1
 
+    #XXX action
     def check_notes(self) :
         notes_path = self.root/NOTES_NAME
         if not notes_path.exists() :
@@ -84,6 +109,7 @@ class MetaExperiment :
             return False
         return True
 
+    #XXX action
     def store(self) :
         if not self.check_notes() :
             print(f"WARNING: store aborted due to empty {NOTES_NAME}")
@@ -105,12 +131,14 @@ class MetaExperiment :
 
         return True
 
+    #XXX lookup
     def symlink_in_archive(self) :
         for p in self.archive_dir.iterdir() :
             if p.is_symlink() :
                 return True
         return False
 
+    #XXX lookup
     def check_if_model_in_use(self) :
         if (self.symlink_in_archive() or 
                 (self.root/NOTES_NAME).exists() or
@@ -119,6 +147,7 @@ class MetaExperiment :
         return False
 
 
+    #XXX action
     def retrieve(self, store_id) :
         if self.check_if_model_in_use() :
             stored = self.store()
@@ -153,6 +182,7 @@ class ModelInfo :
 
         self._init_passthrough_methods()
 
+    #XXX structure
     def _calc_next_run_id(self) :
         cid = 0
         for p in self.run_base.iterdir() :
@@ -180,6 +210,7 @@ class ModelInfo :
         return result
 
 
+    #XXX actions
     def _init_passthrough_methods(self) :
         spec = importlib.util.spec_from_file_location('model_def', self.root/'model_def.py')
         module = importlib.util.module_from_spec(spec)
@@ -215,6 +246,7 @@ class ModelInfo :
         except AttributeError :
             self.register_metrics = machinery.default_register_metrics
 
+
 class Logger :
 
     def __init__(self, logdir, max_buf_size=50) :
@@ -222,6 +254,10 @@ class Logger :
         self.buffer = []
         self.max_buf_size = max_buf_size
         self.metrics = {}
+
+        #if true it will assume outputs is a tuple
+        #and go through it to unpack the data attribute
+        self.unpack_outputs = False
 
         self.epoch_count = 0
         self.batch_count = 0
@@ -247,10 +283,17 @@ class Logger :
 
     def batch_step(self, outputs, labels, loss) :
         loss = loss.data.mean()
-        entry = {'split' : self.split, 'epoch' : self.epoch_count, 'batch' : self.batch_count, 'loss' : loss}
+        entry = {'type' : 'entry', 'split' : self.split, 'epoch' : self.epoch_count, 'batch' : self.batch_count, 'loss' : loss}
+
+        if self.unpack_outputs :
+            outputs = tuple([o.data for o in outputs])
+        else :
+            outputs = outputs.data
+
+        labels = labels.data
 
         for k, m in self.metrics.items() :
-            entry[k] = m(outputs.data, labels.data)
+            entry[k] = m(outputs, labels)
 
         self.buffer.append(entry)
 
@@ -259,4 +302,78 @@ class Logger :
         if len(self.buffer) >= self.max_buf_size :
             self.flush()
 
+
+class LogReader :
+
+    #TODO add a get_epoch_range function
+    def __init__(self, log_file) :
+        self.log_file = Path(log_file)
+
+        with open(self.log_file) as infile :
+            self.raw_log = [json.loads(l) for l in infile.readlines()]
+            self.seek_pos = infile.tell()
+
+        self.log = {}
+        self.base_keyset=set()
+
+        for entry in self.raw_log :
+            self._process_entry(entry) 
+
+
+    def __getitem__(self, key) :
+        return self.log[key]
+
+    def __iter__(self) :
+        return self.log.__iter__()
+
+    def _process_entry(self, entry) :
+
+        if entry['type'] == 'entry' :
+            self.base_keyset.update(entry.keys())
+            for k in entry :
+                try :
+                    entry[k] = float(entry[k])
+                except ValueError :
+                    pass
+
+            split = entry['split']
+            epoch = int(entry['epoch'])
+            batch = int(entry['batch'])
+
+            if split not in self.log :
+                self.log[split] = {}
+            split_log = self.log[split]
+
+            if epoch not in split_log :
+                split_log[epoch] = {}
+            epoch_log = split_log[epoch]
+
+            epoch_log[batch] = entry
+
+    def update(self) :
+        with open(self.log_file) as infile :
+            infile.seek(self.seek_pos)
+            for line in infile :
+                self._process_entry(json.loads(line))
+            self.seek_pos = infile.tell()
+
+    #start is the epoch to start on
+    def get_epochs(self, split, key, start=0, merge=lambda x : sum(x)/len(x)) :
+        split_log = self[split]
+
+        result = {}
+        for i in split_log :
+            if i < start :
+                continue
+            try : 
+                batch_list = [split_log[i][j][key] for j in split_log[i]]
+            except KeyError :
+                continue
+
+            try :
+                result[i] = merge(batch_list)
+            except ZeroDivisionError :
+                result[i] = 0
+
+        return result
 

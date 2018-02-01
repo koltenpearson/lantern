@@ -7,7 +7,7 @@ def train_model(model_info, data_dir, target_epoch, on_gpu=True, threads=2, run_
     if run_id == -1 :
         run_id = model_info.get_new_run()
 
-    print(f"training model_infoeriment {model_info.root}:{run_id}")
+    print(f"training {model_info.root}:{run_id}")
 
     checkpoint_path = model_info.get_checkpoint_path(run_id)
 
@@ -65,7 +65,8 @@ def train_model(model_info, data_dir, target_epoch, on_gpu=True, threads=2, run_
         model_info.train(train_loader, model, loss, optimizer, logger)
 
         model.eval()
-        logger.split = 'eval'
+        logger.split = 'val'
+        logger.batch_count = 0
         if 'val' in dsets :
             model_info.train(val_loader, model, loss, optimizer, logger)
 
@@ -81,8 +82,15 @@ def train_model(model_info, data_dir, target_epoch, on_gpu=True, threads=2, run_
         print(f"finished epoch {last_epoch}")
 
     if 'test' in dsets :
+
+        #TODO make this more encapsulated?
+        logger.epoch_count -= 1
+        logger.batch_count = 0
+
         logger.split = 'test'
         model_info.train(test_loader, model, loss, optimizer, logger)
+
+    logger.flush()
 
 
 
