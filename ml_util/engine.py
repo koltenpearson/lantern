@@ -1,4 +1,4 @@
-from .structures import Logger
+from .log import Logger
 import torch
 from torch.utils.data import DataLoader
 
@@ -34,9 +34,8 @@ def train_model(model_info, data_dir, target_epoch, on_gpu=True, threads=2, run_
 
     scheduler = model_info.get_scheduler(optimizer, last_epoch)
 
-    logger = Logger(model_info.get_log_path(run_id))
+    logger = Logger(model_info.get_log_path(run_id), model)
     model_info.register_metrics(logger)
-    logger.epoch_count = last_epoch + 1
 
     print(f"loading data from {data_dir}")
     dsets = model_info.get_datasets(data_dir)
@@ -57,20 +56,19 @@ def train_model(model_info, data_dir, target_epoch, on_gpu=True, threads=2, run_
                 num_workers=threads)
 
     print("starting training")
+    logger.log_start(model_info.hparams, data_dir)
     while last_epoch < target_epoch :
         last_epoch += 1
 
         model.train()
-        logger.split = 'train'
+        logger.log_epoch_start('train')
         model_info.train(train_loader, model, loss, optimizer, logger)
 
         model.eval()
-        logger.split = 'val'
-        logger.batch_count = 0
         if 'val' in dsets :
+            logger.log_epoch_start('val')
             model_info.train(val_loader, model, loss, optimizer, logger)
 
-        logger.epoch_step()
         if scheduler is not None :
             scheduler.step()
 
@@ -78,24 +76,18 @@ def train_model(model_info, data_dir, target_epoch, on_gpu=True, threads=2, run_
                     'optim' : optimizer.state_dict(),
                     'model' : model.state_dict(),
                     'hparams' : model_info.hparams}, checkpoint_path)
+        logger.log_completion()
 
         print(f"finished epoch {last_epoch}")
 
+
     if 'test' in dsets :
 
-        #TODO make this more encapsulated?
-        logger.epoch_count -= 1
-        logger.batch_count = 0
-
-        logger.split = 'test'
+        logger.log_epoch_start('test')
         model_info.train(test_loader, model, loss, optimizer, logger)
-
-    logger.flush()
-
+        logger.log_completion()
 
 
-
-    
 
 
 

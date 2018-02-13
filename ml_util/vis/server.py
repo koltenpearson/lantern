@@ -1,6 +1,8 @@
 import cherrypy
 from .build import HTMLComponent, JSONComponent, PageTemplate
-from ..structures import LogReader, ModelReader
+from ..structures import ProjectLookup
+from ..log import LogReader
+from pathlib import Path
 import pkgutil
 
 SPLIT_COLORS = {
@@ -42,6 +44,49 @@ def gen_split_compare(log, key) :
     return chart.to_json_dict()
 
 
+ignore_keys = ['type', 'split', 'epoch']
+
+class NavManger :
+
+    def __init__(self, root) :
+        self.root = Path(root)
+        self.lookup = ProjectLookup(root)
+        self.logs = {}
+
+    def get_log(self,key) :
+        if tuple(key[:3]) not in self.logs :
+            exp = self.lookup.get_experiment(key[0])
+            model = exp.get_model(key[1])
+            log = model.get_log(key[2])
+            self.logs[tuple(key[:3])] = log
+            return log
+        return self.logs[tuple(key[:3])]
+
+    def get_key(self, key) :
+        list_keys = self.lookup.list_experiments
+
+        try :
+            exp = self.lookup.get_experiment(key[0])
+            list_keys = exp.list_models
+
+            model = exp.get_model(key[1])
+            list_keys = model.list_runs
+
+            run = key[2]
+            log = self.get_log(key)
+            keyset = set(log.base_keyset)
+            [keyset.remove(k) for k in ignore_keys]
+            list_keys = lambda : list(keyset)
+
+            split = key[3]
+
+        except IndexError :
+            pass
+
+        return list_keys()
+
+
+
 ##########################################################################
 ## server
 CHARTJS_CDN = "https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.7.1/Chart.min.js"
@@ -61,21 +106,29 @@ class LogVis :
         self.style = pkgutil.get_data(__name__, 'style.css').decode('ascii')
         self.script = pkgutil.get_data(__name__, 'script.js').decode('ascii')
 
-        self.mreader = ModelReader(model_dir)
+        self.nav_manage = NavManger(model_dir)
+
 
     @cherrypy.expose
+    @cherrypy.tools.json_in()
     @cherrypy.tools.json_out()
-    def get_log(self, run_id) :
-        log = self.mreader.get_log(run_id)
-        return gen_split_compare(log, 'accuracy')
+    def get_log(self) :
+        key = cherrypy.request.json
+        log = self.nav_manage.get_log(key)
+        return gen_split_compare(log, key[-1])
     
 
     @cherrypy.expose
+    @cherrypy.tools.json_in()
     @cherrypy.tools.json_out()
-    def get_runs(self) :
+    def nav(self) :
+        key = cherrypy.request.json
+        
         result = JSONComponent()
-        for i in sorted(self.mreader.get_run_ids()) :
-            result.id = i
+
+        for e in self.nav_manage.get_key(key) :
+            result.id = e
+            result.nav_path = key
             result.next()
 
         return result.to_json_dict()
@@ -84,9 +137,11 @@ class LogVis :
     @cherrypy.expose
     def index(self) :
         body = HTMLComponent('body')
-        body.child('div', 'exp_dir', 'directory')
-        body.child('div', 'run-dir', 'directory')
-        body.child('div', 'key-dir', 'directory')
+        nav = body.child('div', 'nav-div', 'directory-container')
+        nav.child('div', 'exp-dir', 'directory')
+        nav.child('div', 'model-dir', 'directory')
+        nav.child('div', 'run-dir', 'directory')
+        nav.child('div', 'key-dir', 'directory')
 
         body.child('div', 'log-div')
 

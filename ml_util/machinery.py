@@ -30,8 +30,7 @@ def basic_train(dataloader, model, loss, optimizer, logger) :
             loss_out.backward()
             optimizer.step()
 
-
-        logger.batch_step(outputs, labels, loss_out)
+        logger.log_batch(inputs, outputs, labels, loss_out.data.mean())
 
 def gen_gradpool_train(iter_size) :
     return lambda *args : gradpool_train(iter_size, *args)
@@ -40,6 +39,7 @@ def gradpool_train(iter_size, dataloader, model, loss, optimizer, logger) :
     iter_counter = 0
 
     volatile = not model.training
+    
     for batch_counter, data in enumerate(dataloader) :
 
         inputs, labels = data
@@ -62,7 +62,7 @@ def gradpool_train(iter_size, dataloader, model, loss, optimizer, logger) :
                 optimizer.step()
                 iter_counter = 0
 
-        logger.batch_step(outputs, labels, loss_out)
+        logger.log_batch(inputs, outputs, labels, loss_out.data.mean())
 
 
 ############################################################################

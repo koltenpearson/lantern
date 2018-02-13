@@ -40,11 +40,14 @@ class HTMLComponent :
         for key,value in attrs.items() :
             self.attributes[key] = value
 
+    def _parse_key(self, key) :
+        return key.replace('_', '-')
+
     def __getitem__(self, key) :
-        return self.attributes[key]
+        return self.attributes[self._parse_key(key)]
 
     def __setitem__(self, key, value) :
-        self.attributes[key] = value
+        self.attributes[self._parse_key(key)] = value
 
     def child(self, tag, _id=None, _class=None, **attrs) :
         result = HTMLComponent(tag, _id=_id, _class=_class, **attrs)

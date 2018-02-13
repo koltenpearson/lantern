@@ -11,7 +11,7 @@ from .vis import server as vis
 
 def train_experiment(args) :
 
-    model_info = structures.ModelInfo(args.model_dir)
+    model_info = structures.Model(args.model_dir)
     engine.train_model(model_info, args.data_dir, args.epochs, on_gpu=(not args.cpu), threads=args.threads, run_id=args.id)
 
 
