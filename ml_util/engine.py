@@ -1,6 +1,7 @@
 from .log import Logger
 import torch
 from torch.utils.data import DataLoader
+from .util import wrap_single, unwrap_single
 
 def train_model(model_info, data_dir, target_epoch, on_gpu=True, threads=2, run_id=-1) :
 
@@ -16,24 +17,30 @@ def train_model(model_info, data_dir, target_epoch, on_gpu=True, threads=2, run_
         state = torch.load(checkpoint_path)
         model_info.hparams.update(state['hparams'])
         last_epoch = state['last_epoch']
-        print("restoring from checkpoint {checkpoint_path} at epoch {last_epoch + 1}")
+        print(f"restoring from checkpoint {checkpoint_path} at epoch {last_epoch + 1}")
 
-    model = model_info.get_model()
+    model = wrap_single(model_info.get_model())
 
     if on_gpu :
         print("using gpus")
-        model = model.cuda()
-    model.on_gpu = on_gpu
+        model = [m.cuda() for m in model]
 
-    loss = model_info.get_loss()
-    optimizer = model_info.get_optimizer(model)
+    for m in model : m.on_gpu = on_gpu
+
+    loss = wrap_single(model_info.get_loss())
+
+    optimizer = wrap_single(model_info.get_optimizer(unwrap_single(model)))
 
     if checkpoint_path.exists() :
-        model.load_state_dict(state['model'])
-        optimizer.load_state_dict(state['optim'])
+        model_state = wrap_single(state['model'])
+        for m,s in zip(model, model_state) : m.load_state_dict(s)
 
-    scheduler = model_info.get_scheduler(optimizer, last_epoch)
+        optim_state = wrap_single(state['optim'])
+        for o,s in zip(optimizer, optim_state) : o.load_state_dict(s)
 
+    scheduler = wrap_single(model_info.get_scheduler(unwrap_single(optimizer), last_epoch))
+
+    #logger is aware of the tuple/single transparency, so we don't conditionally unwrap the model
     logger = Logger(model_info.get_log_path(run_id), model)
     model_info.register_metrics(logger)
 
@@ -60,21 +67,21 @@ def train_model(model_info, data_dir, target_epoch, on_gpu=True, threads=2, run_
     while last_epoch < target_epoch :
         last_epoch += 1
 
-        model.train()
+        for m in model : m.train()
         logger.log_epoch_start('train')
-        model_info.train(train_loader, model, loss, optimizer, logger)
+        model_info.train(train_loader, unwrap_single(model), unwrap_single(loss), unwrap_single(optimizer), logger)
 
-        model.eval()
+        for m in model : m.eval()
         if 'val' in dsets :
             logger.log_epoch_start('val')
-            model_info.train(val_loader, model, loss, optimizer, logger)
+            model_info.train(val_loader, unwrap_single(model), unwrap_single(loss), unwrap_single(optimizer), logger)
 
-        if scheduler is not None :
-            scheduler.step()
+        if scheduler[0] is not None :
+            for s in scheduler : s.step()
 
         torch.save({'last_epoch' : last_epoch,
-                    'optim' : optimizer.state_dict(),
-                    'model' : model.state_dict(),
+                    'optim' : unwrap_single([o.state_dict() for o in optimizer]),
+                    'model' : unwrap_single([m.state_dict() for m in model]),
                     'hparams' : model_info.hparams}, checkpoint_path)
         logger.log_completion()
 
@@ -84,7 +91,7 @@ def train_model(model_info, data_dir, target_epoch, on_gpu=True, threads=2, run_
     if 'test' in dsets :
 
         logger.log_epoch_start('test')
-        model_info.train(test_loader, model, loss, optimizer, logger)
+        model_info.train(test_loader, unwrap_single(model), unwrap_single(loss), unwrap_single(optimizer), logger)
         logger.log_completion()
 
 

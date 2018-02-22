@@ -1,5 +1,5 @@
 
-body {
+#content {
     display : flex;
     align-items : flex-start;
 }
@@ -7,6 +7,23 @@ body {
 .directory {
     /*background-color : #AAAAAA;*/
     padding : 0.5em;
+}
+
+.log-container {
+    background-color : #FFFFFF;
+
+}
+
+.single-char-button {
+    font-family : monospace;
+    font-weight : bold;
+    display : inline-block;
+    padding : 10px;
+    cursor : default;
+}
+
+.single-char-button:hover {
+    background-color : #AAAAAA;
 }
 
 #log-div {

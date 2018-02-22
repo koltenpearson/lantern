@@ -1,19 +1,7 @@
 "use strict;"
 
-function ajax_get(ajax_conf) {
-    var req = new XMLHttpRequest();
-    req.open('GET', ajax_conf.url);
-    req.onload = function() {
-
-        if (req.status == 200) {
-            ajax_conf.success(req.responseText);
-        } else {
-            ajax_conf.failure(req.status)
-        }
-    };
-
-    req.send();
-}
+////////////////////////////////////////////////////////////////////////////
+// general javascript utility functions
 
 function ajaj(ajaj_conf) {
     var req = new XMLHttpRequest();
@@ -35,50 +23,239 @@ function ajaj(ajaj_conf) {
     req.send(JSON.stringify(ajaj_conf.body));
 }
 
-function get_id(prepend, key) {
-    result = prepend;
+function remove_element_with_id(id) {
+    var to_remove = document.getElementById(id);
+    to_remove.parentNode.removeChild(to_remove);
+}
+
+function remove_all_children(elem) {
+    while (elem.firstChild)
+        elem.removeChild(elem.firstChild);
+}
+
+function encoded_png(png_string) {
+    var result = document.createElement('img');
+    result.src = "data:image/png;base64," + png_string;
+    return result
+}
+
+function range_array_selector(array) {
+    var range = document.createElement('input');
+    range.setAttribute('type', 'range');
+    range.setAttribute('min', 0);
+    range.setAttribute('max', array.length-1);
+    range.setAttribute('step', 1);
+    range.setAttribute('value', array.length-1);
+
+    return range;
+
+}
+
+
+////////////////////////////////////////////////////////////////////////////
+// server specific utilty functions
+
+function get_id(prefix, key, suffix) {
+    result = prefix;
 
     for (var i =0; i < key.length; i++)
         result += `-${key[i]}`;
     return result;
 }
 
-function toggle_log(key) {
+////////////////////////////////////////////////////////////////////////////
+//page actions
 
-    var canvas_id = get_id('log-canvas', key);
-    var check_canvas = document.getElementById(canvas_id);
-    if (check_canvas) {
-        check_canvas.parentNode.removeChild(check_canvas);
-        return;
-    }
+var log_url = '/epoch_log'
 
+//TODO not hardcode these? 
+var log_url_map = {
+    '/epoch_log' : build_scalar_log,
+    '/batch_log' : build_scalar_log,
+    '/image_log' : build_image_log,
+}
+
+var log_mode_map = {
+    '/epoch_log' : 'scalar',
+    '/batch_log' : 'scalar',
+    '/image_log' : 'image',
+}
+
+
+function append_log(nav_path, nav_info) {
+
+
+    var log_cont = build_log_container(nav_path);
+    var log_insert = log_cont.getElementById(get_id('log-insert', nav_path));
     var log_div = document.getElementById('log-div');
+
     ajaj({
-        url : `/get_log`,
-        body : key,
+        url : log_url,
+        body : nav_info,
         success : function(log_json) {
-            var canvas = document.createElement('canvas');
-            canvas.width = 800;
-            canvas.height = 500;
-            canvas.id = canvas_id;
-
-            new Chart(canvas, log_json);
-
-            log_div.appendChild(canvas);
+            log_url_map[log_url](get_id('log', nav_path), log_insert, log_json);
+            log_div.appendChild(log_cont);
         },
         failure : function(){}
     });
 }
 
+function expand_nav(nav_path) {
 
-function create_nav_div(info) {
+    var next_nav_index = nav_path.length;
+    var nav_div = document.getElementById('nav-div');
+
+    ajaj({
+        url : '/nav',
+        body : {'key' : nav_path, 'mode' : log_mode_map[log_url]},
+        success : function(results) {
+            if (results['end_point']) {
+                append_log(nav_path, results.result)
+                return
+            }
+
+            //remove current children
+            for (var i = next_nav_index; i < nav_div.children.length; i++) {
+                while (nav_div.children[i].firstChild)
+                    nav_div.children[i].removeChild(nav_div.children[i].firstChild);
+            }
+
+            if (nav_div.children.length <= next_nav_index) {
+                nav_div.appendChild(build_nav_container());
+            }
+
+            for (var i = 0; i < results.result.length; i++) {
+                nav_div.children[next_nav_index].appendChild(build_sub_nav_div(results['result'][i], nav_path));
+            }
+
+        },
+        failure : function(){}
+    });
+
+}
+////////////////////////////////////////////////////////////////////////////
+// page constructions
+
+function build_scalar_log(id_prefix, insert_element, log_json) {
+    var canvas_id = get_id(id_prefix, ['scalar','canvas']);
+
+    var canvas = document.createElement('canvas');
+    canvas.width = 800;
+    canvas.height = 500;
+    canvas.id = canvas_id;
+
+    new Chart(canvas, log_json);
+
+    insert_element.appendChild(canvas);
+
+}
+
+function build_image_log(id_prefix, insert_element, log_json) {
+    var viewer_id = get_id(id_prefix, ['image', 'viewer']);
+    console.log(log_json);
+
+    var frag = document.createDocumentFragment();
+    var viewer = document.createElement('div');
+    viewer.id = viewer_id;
+    viewer.className = 'image-viewer';
+    frag.appendChild(viewer);
+
+    var splits = Object.keys(log_json);
+    splits.sort();
+
+    for (var i =0; i < splits.length; i++) {
+        let split = splits[i];
+
+        let view_control = document.createElement('div');
+        view_control.className = 'image-viewer-controller';
+
+        let head = document.createElement('h3');
+        head.innerText = split;
+        view_control.appendChild(head);
+
+        let batches = Object.keys(log_json[split]);
+        batches.sort();
+
+        let range = range_array_selector(batches);
+        view_control.appendChild(range);
+
+        let epoch_label = document.createElement('p');
+        epoch_label.innerText = batches[range.value];
+        view_control.appendChild(epoch_label);
+
+
+        let image_cont = document.createElement('div');
+        image_cont.className = 'image-viewer-container';
+
+        for (let j = 0; j < log_json[split][batches[range.value]].length; j++) {
+            image_cont.appendChild(encoded_png(log_json[split][batches[range.value]][j]));
+        }
+
+
+        range.oninput = function() {
+            epoch_label.innerText = batches[range.value];
+            remove_all_children(image_cont);
+
+            for (let j = 0; j < log_json[split][batches[range.value]].length; j++) {
+                image_cont.appendChild(encoded_png(log_json[split][batches[range.value]][j]));
+            }
+        };
+
+        viewer.appendChild(view_control);
+        viewer.appendChild(image_cont);
+
+    }
+
+    //viewer.appendChild(encoded_png(log_json['train']['0'][0]))
+
+    insert_element.appendChild(frag);
+}
+
+
+function build_log_container(nav_path) {
+    var cont_id = get_id('log-container', nav_path);
+
+    var frag = document.createDocumentFragment();
+
+    var cont = document.createElement('div');
+    cont.id = cont_id;
+    cont.className = 'log-container';
+    frag.appendChild(cont)
+
+    var close_button = document.createElement('div');
+    close_button.innerText = 'X';
+    close_button.className = 'single-char-button';
+    close_button.onclick = function(event) {
+        remove_element_with_id(cont_id);
+    };
+
+    cont.appendChild(close_button);
+
+    var insert = document.createElement('div');
+    insert.id = get_id('log-insert', nav_path);
+    cont.appendChild(insert)
+
+    return frag;
+
+}
+
+function build_nav_container() {
+    var elem = document.createElement('div');
+    elem.className = 'nav-cont';
+    return elem;
+}
+
+function build_sub_nav_div(info, nav_path) {
+    nav_path = nav_path.slice()
+    nav_path.push(info.id)
+
     var frag = document.createDocumentFragment();
 
     var elem = document.createElement('div');
     elem.id = `select-nav-${info.id}`;
-    elem.class = 'select-nav';
+    elem.className = 'select-nav';
     elem.onclick = function(event) {
-        expand_nav(info.id, info.nav_path);
+        expand_nav(nav_path);
     };
     frag.appendChild(elem);
 
@@ -98,70 +275,21 @@ function create_nav_div(info) {
 
 }
 
-function expand_nav(id, nav_path) {
 
-    nav_path = nav_path.slice()
-    nav_path.push(id)
+////////////////////////////////////////////////////////////////////////////
+// event hooks
 
-    var next_nav_index = nav_path.length;
+document.addEventListener("DOMContentLoaded", function () {
+    expand_nav([]);
 
-    var nav_div = document.getElementById('nav-div');
+    var log_type_buttons = document.getElementsByClassName('log-type-button')
 
-    if (nav_path.length >= nav_div.children.length) {
-        toggle_log(nav_path);
-        return;
+    for (var i = 0; i < log_type_buttons.length; i++) {
+        log_type_buttons[i].onclick = function () {
+            expand_nav([]);
+            log_url = this.dataset.url;
+        }
     }
 
-    ajaj({
-        url : '/nav',
-        body : nav_path,
-        success : function(results) {
-            for (var i = next_nav_index; i < nav_div.children.length; i++) {
-                while (nav_div.children[i].firstChild)
-                    nav_div.children[i].removeChild(nav_div.children[i].firstChild);
-            }
-
-            for (var i = 0; i < results.length; i++) {
-                nav_div.children[next_nav_index].appendChild(create_nav_div(results[i]));
-            }
-        },
-        failure : function(){}
-    });
-
-}
-
-document.addEventListener("DOMContentLoaded", function () {
-    var nav_div = document.getElementById('nav-div');
-
-    ajaj({
-        url : '/nav',
-        body : [],
-        success : function(results) {
-            for (var i = 0; i < results.length; i++) {
-                nav_div.children[0].appendChild(create_nav_div(results[i]));
-            }
-        },
-        failure : function(){}
-    });
-
-
 });
-
-//chart example
-/*
-document.addEventListener("DOMContentLoaded", function () {
-    canvas = document.getElementById("log-chart").getContext("2d");
-
-    ajax_get({
-        url : '/get_log',
-        success : function(rtext) {
-            response = JSON.parse(rtext);
-            new Chart(canvas, response);
-        },
-        failure : function(){}
-    });
-
-});
-
-*/
 

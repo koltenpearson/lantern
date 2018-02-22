@@ -4,6 +4,7 @@ import msgpack_numpy
 msgpack_numpy.patch()
 
 from collections import defaultdict
+from .util import unwrap_single
 
 class Logger :
 
@@ -35,10 +36,10 @@ class Logger :
         self.buffer.clear()
         outfile.close()
 
-    def log_batch(self, inputs, outputs, labels, loss) :
-        self.log_tensors(self.model)
-        self.log_images(inputs, outputs, labels)
-        self.log_scalars(outputs, labels, loss)
+    def log_batch(self, inputs, outputs, labels, prefix='') :
+        self.log_tensors(self.model, prefix)
+        self.log_images(inputs, outputs, labels, prefix)
+        self.log_scalars(outputs, labels, prefix)
         self.batch_count += 1
 
     def add_to_buffer(self, entry) :
@@ -74,33 +75,43 @@ class Logger :
             labels = labels.data
         return outputs, labels
 
-    #TODO add things like time, mem usage, etc
-    def log_scalars(self, outputs, labels, loss) :
-        entry = {'type' : 'scalar', 'batch_count' : self.batch_count, 'key' : 'loss', 'value' : loss}
+    def log_scalar_direct(self, key, scalar) :
+        entry = {'type' : 'scalar', 'batch_count' : self.batch_count, 'key' : key, 'value' : scalar}
         self.add_to_buffer(entry)
 
+    def log_scalars(self, outputs, labels, prefix) :
         outputs, labels = self._proc_outputs_labels(outputs, labels)
 
         for k, (m, f) in self.scalar_metrics.items() :
+            if k[:len(prefix)] != prefix :
+                continue
+
             if (f is None and self.batch_count == 0) or (f is not None and self.batch_count % f == 0) :
                 entry = {'type' : 'scalar', 'batch_count' : self.batch_count, 'key' : k}
                 entry['value'] = m(outputs, labels)
                 self.add_to_buffer(entry)
 
 
-    def log_tensors(self, model) :
+    def log_tensors(self, model, prefix) :
         for k, (m, f, e) in self.tensor_metrics.items() :
+            if k[:len(prefix)] != prefix :
+                continue
+
             if (f is None and self.batch_count == 0) or (f is not None and self.batch_count % f == 0) :
-                if model.training or e :
+                if model[0].training or e :
                     entry = {'type' : 'tensor', 'batch_count' : self.batch_count, 'key' : k }
-                    entry['value'] = m(model).numpy()
+                    entry['value'] = m(unwrap_single(model)).numpy()
                     self.add_to_buffer(entry)
 
-    def log_images(self, inputs, outputs, labels) :
+    def log_images(self, inputs, outputs, labels, prefix) :
         outputs, labels = self._proc_outputs_labels(outputs, labels)
         inputs = inputs.data
+        #TODO add check for correct input types?
 
         for k, (m, f) in self.image_metrics.items() :
+            if k[:len(prefix)] != prefix :
+                continue
+
             if (f is None and self.batch_count == 0) or (f is not None and self.batch_count % f == 0) :
                 entry = {'type' : 'image', 'batch_count' : self.batch_count, 'key' : k}
                 entry['value'] = [d.numpy() for d in m(inputs, outputs, labels)]
@@ -115,7 +126,7 @@ class Logger :
     def register_tensor_metric(self, key, metric, freq=None, on_eval=False) :
         self.tensor_metrics[key] = (metric, freq, on_eval)
 
-    #metric should take in (inputs, outputs, labels), give back a tuple of tensors of shape BX3XWxH
+    #metric should take in (inputs, outputs, labels), give back a tuple of tensors of shape 3xWxH
     def register_image_metric(self, key, metric, freq=None) :
         self.image_metrics[key] = (metric, freq)
 
@@ -158,12 +169,15 @@ class LogReader :
 
 
     def _delete_from(self, count, log) :
+        to_delete = []
         for key in log :
             try :
                 if key > count :
-                    del log[key]
+                    to_delete.append(key)
             except TypeError :
                 self._delete_from(count, log[key])
+        for key in to_delete :
+            del log[key]
 
 
     def _process_entry(self, entry) :
@@ -215,23 +229,42 @@ class LogReader :
                 self._process_entry(entry)
             self.seek_pos = infile.tell()
 
-    #start is the epoch to start on
-    def get_epochs(self, split, key, start=0, merge=lambda x : sum(x)/len(x)) :
-        split_log = self[split]
 
-        result = {}
-        for i in split_log :
-            if i < start :
-                continue
-            try : 
-                batch_list = [split_log[i][j][key] for j in split_log[i]]
-            except KeyError :
-                continue
+    def get_epochs(self, data, start=0, merge=lambda x : 0 if len(x) == 0 else sum(x)/len(x)) :
+        epochs = {}
 
-            try :
-                result[i] = merge(batch_list)
-            except ZeroDivisionError :
-                result[i] = 0
+        keys_ordered = sorted(list(data.keys()), reverse=True)
 
-        return result
+        e_start = self.epoch_starts[start]
+
+        try :
+            while (keys_ordered[-1] < e_start) :
+                keys_ordered.pop()
+
+            i = start-1 #in case they want only the last epoch and the loop is passed over
+            for i, e_end in enumerate(self.epoch_starts[start+1:], start) :
+
+                epoch_bin = []
+                while (keys_ordered[-1] < e_end) :
+                    epoch_bin.append(data[keys_ordered.pop()])
+
+                if len(epoch_bin) > 0 :
+                    epochs[i] = merge(epoch_bin)
+
+            epoch_bin = []
+
+            while(len(keys_ordered) > 0) :
+                epoch_bin.append(data[keys_ordered.pop()])
+
+            if len(epoch_bin) > 0 :
+                epochs[i+1] = merge(epoch_bin)
+
+        except (KeyError, IndexError) :
+            pass
+
+        return epochs
+
+
+
+
 

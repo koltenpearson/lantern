@@ -8,16 +8,24 @@ from torchvision import transforms
 ############################################################################
 ## trainers
 
+def get_variables(inputs, labels, volatile, on_gpu) :
+    """utility function for correctly creating variables)"""
+    if on_gpu :
+        inputs, labels = Variable(inputs, volatile=volatile).cuda(), Variable(labels, volatile=volatile).cuda()
+    else :
+        inputs, labels = Variable(inputs, volatile=volatile), Variable(labels, volatile=volatile)
+
+    return inputs, labels
+
+
 def basic_train(dataloader, model, loss, optimizer, logger) :
     volatile = not model.training
 
     for data in dataloader :
 
         inputs, labels = data
-        if model.on_gpu :
-            inputs, labels = Variable(inputs, volatile=volatile).cuda(), Variable(labels, volatile=volatile).cuda()
-        else :
-            inputs, labels = Variable(inputs, volatile=volatile), Variable(labels, volatile=volatile)
+
+        inputs, labels = get_variables(inputs, labels, volatile, model.on_gpu)
 
         if model.training :
             optimizer.zero_grad()
@@ -30,7 +38,9 @@ def basic_train(dataloader, model, loss, optimizer, logger) :
             loss_out.backward()
             optimizer.step()
 
-        logger.log_batch(inputs, outputs, labels, loss_out.data.mean())
+        
+        logger.log_scalar_direct('loss', loss_out.data.mean())
+        logger.log_batch(inputs, outputs, labels)
 
 def gen_gradpool_train(iter_size) :
     return lambda *args : gradpool_train(iter_size, *args)
@@ -43,11 +53,8 @@ def gradpool_train(iter_size, dataloader, model, loss, optimizer, logger) :
     for batch_counter, data in enumerate(dataloader) :
 
         inputs, labels = data
-        if model.on_gpu :
-            inputs, labels = Variable(inputs, volatile=volatile).cuda(), Variable(labels, volatile=volatile).cuda()
-        else :
-            inputs, labels = Variable(inputs, volatile=volatile), Variable(labels, volatile=volatile)
-
+        inputs, labels = get_variables(inputs, labels, volatile, model.on_gpu)
+        
         if model.training and iter_counter == 0 :
             optimizer.zero_grad()
 
@@ -62,7 +69,63 @@ def gradpool_train(iter_size, dataloader, model, loss, optimizer, logger) :
                 optimizer.step()
                 iter_counter = 0
 
-        logger.log_batch(inputs, outputs, labels, loss_out.data.mean())
+        logger.log_scalar_direct('loss', loss_out.data.mean())
+        logger.log_batch(inputs, outputs, labels)
+
+def adversarial_train(dataloader, models, loss, optimizers, logger) :
+    g_model, d_model = models
+    g_optim, d_optim = optimizers
+
+    #discriminator pass
+    for data in dataloader :
+
+        #real data
+        real_inputs, original_labels = data
+        fake_seeds = g_model.generator_input(real_inputs, original_labels)
+
+        real_inputs, real_labels = get_variables(inputs, torch.ones(real_inputs.shape[0]), not d_model.training, d_model.on_gpu)
+
+        if d_model.training :
+            d_optim.zero_grad()
+
+        real_outputs = d_model(real_inputs)
+        real_loss_out = loss(real_outputs, real_labels)
+
+        if d_model.training :
+            real_loss_out.backward()
+
+        fake_seeds, fake_labels = get_variables(fake_seeds, torch.zeros(fake_seeds.shape[0]), not g_model.training, g_model.on_gpu)
+        fake_inputs = g_model(fake_seeds).detach() #we don't want to train the generator on these so detach and save some time
+        fake_outputs = d_model(fake_inputs)
+        fake_loss_out = loss(fake_outputs, fake_labels)
+
+        if d_model.training :
+            fake_loss_out.backward()
+            d_optim.step()
+
+        logger.log_scalar_direct('d_loss', torch.cat((fake_loss_out.data, real_loss_out.data)).mean())
+        logger.log_batch(torch.cat((real_inputs,fake_inputs)), torch.cat((real_outputs, fake_outputs)), torch.cat((real_labels, fake_labels)), prefix='d_')
+
+    #generator pass
+    for data in dataloader :
+
+        if g_model.training :
+            g_optim.zero_grad()
+
+        original_input, original_labels = data
+        g_seed = g_model.generator_input(original_input, original_labels)
+        g_seed, g_labels = get_variables(seed, torch.ones(seed.shape[0]), not g_model.training, g_model.on_gpu)
+
+        g_inputs = g_model(g_seed)
+        g_output = d_model(g_inputs)
+        g_loss_out = loss(g_output, labels)
+
+        if g_model.training :
+            g_loss_out.backward()
+            g_optim.step()
+
+        logger.log_scalar_direct('g_loss', g_loss_out.data.mean())
+        logger.log_batch(g_seed, g_inputs, g_output, prefix='g_')
 
 
 ############################################################################

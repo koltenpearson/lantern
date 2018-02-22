@@ -5,28 +5,52 @@ from ..log import LogReader
 from pathlib import Path
 import pkgutil
 
+from PIL import Image
+import numpy as np
+import base64
+import io
+
 SPLIT_COLORS = {
         'train' : '#FF0000',
         'val' : '#00FF00',
         'test' : '#0000FF'
         }
 
-def gen_split_compare(log, key) :
+def convert_to_image_array(arr) :
+    i_min = arr.min()
+    i_max = arr.max()
+    img = ((arr -i_min)/(i_max-i_min)) * 255
+    return img.astype(np.uint8).transpose((1,2,0))
+
+
+def encode_image(arr) :
+    img = Image.fromarray(arr)
+    png = io.BytesIO()
+    img.save(png, 'png')
+    encoded = base64.b64encode(png.getvalue())
+    return encoded.decode('ascii')
+
+def gen_split_compare(log, key, use_epochs=True) :
     chart = JSONComponent()
     chart.type = 'line'
 
+    working_logs = {}
+    for split in log['scalar'] :
+        if key in log['scalar'][split] :
+            working_logs[split] = log['scalar'][split][key]
+            if use_epochs :
+                working_logs[split] = log.get_epochs(working_logs[split])
+
     max_epochs = 0
-    for split in log :
-        epochs = max([k for k in log[split]])
-        if epochs > max_epochs :
-            max_epochs = epochs
+    for l in working_logs.values() :
+        if max(l) > max_epochs :
+            max_epochs = max(l)
     
-    for split in log :
+    for split,l in working_logs.items() :
         data = []
-        raw_data = log.get_epochs(split, key)
         for i in range(max_epochs+1) :
-            if i in raw_data :
-                data.append(raw_data[i])
+            if i in l :
+                data.append(l[i])
             else :
                 data.append(None)
 
@@ -34,6 +58,16 @@ def gen_split_compare(log, key) :
         chart.data.datasets.label = split
         chart.data.datasets.borderColor = SPLIT_COLORS[split]
         chart.data.datasets.borderWidth = '1'
+
+        if (split == 'test') :
+            chart.data.datasets.pointRadius = '5'
+            chart.data.datasets.pointHoverRadius = '8'
+
+        if (not use_epochs) :
+            chart.data.datasets.pointRadius = '0'
+            chart.data.datasets.pointHoverRadius = '0'
+
+
         chart.data.datasets.fill = False
         chart.data.datasets.next()
 
@@ -43,47 +77,54 @@ def gen_split_compare(log, key) :
 
     return chart.to_json_dict()
 
+class NavLink :
 
-ignore_keys = ['type', 'split', 'epoch']
+    def __init__(self) :
+        self.link = None
+        self.coupling = None
+        self.list_keys = lambda link : None
+        self.follow_key = lambda link, key : None
 
-class NavManger :
+    def resolve(self, keys) :
+        if self.coupling is None :
+            return self.link, True
 
-    def __init__(self, root) :
-        self.root = Path(root)
-        self.lookup = ProjectLookup(root)
-        self.logs = {}
+        if len(keys) == 0 :
+            return self.list_keys(self.link), False
 
-    def get_log(self,key) :
-        if tuple(key[:3]) not in self.logs :
-            exp = self.lookup.get_experiment(key[0])
-            model = exp.get_model(key[1])
-            log = model.get_log(key[2])
-            self.logs[tuple(key[:3])] = log
-            return log
-        return self.logs[tuple(key[:3])]
+        self.coupling.link = self.follow_key(self.link, keys[0])
+        return self.coupling.resolve(keys[1:])
 
-    def get_key(self, key) :
-        list_keys = self.lookup.list_experiments
 
-        try :
-            exp = self.lookup.get_experiment(key[0])
-            list_keys = exp.list_models
+class KeyHolder :
 
-            model = exp.get_model(key[1])
-            list_keys = model.list_runs
+    def __init__(self, value) :
+        self.key = value
 
-            run = key[2]
-            log = self.get_log(key)
-            keyset = set(log.base_keyset)
-            [keyset.remove(k) for k in ignore_keys]
-            list_keys = lambda : list(keyset)
+def setup_project_nav_chain(p_lookup, log_retrieve, mode_key) :
+    head = NavLink()
+    head.link = p_lookup
+    head.list_keys = lambda pl : [{'id':name} for name in sorted(pl.list_archives())]
+    head.follow_key = lambda pl, key : pl.get_archiver(key)
 
-            split = key[3]
+    tail = NavLink()
+    tail.list_keys = lambda arch : [{'id' : name} for name in sorted(arch.list_models(), reverse=True)]
+    tail.follow_key = lambda arch, key : arch.get_model(key)
+    head.coupling = tail
 
-        except IndexError :
-            pass
+    tail = NavLink()
+    tail.list_keys = lambda md : [{'id' : name} for name in sorted(md.list_runs(), reverse=True)]
+    tail.follow_key = lambda md, key : log_retrieve(md.get_log(key))
+    head.coupling.coupling = tail
 
-        return list_keys()
+    tail = NavLink()
+    tail.list_keys = lambda l : [{'id' : name} for name in l[mode_key.value]['train']]
+    tail.follow_key = lambda l, key : (str(l.log_file), key)
+    head.coupling.coupling.coupling = tail
+
+    head.coupling.coupling.coupling.coupling = NavLink()
+
+    return head
 
 
 
@@ -94,7 +135,7 @@ CHARTJS_CDN = "https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.7.1/Chart.min.j
 
 class LogVis :
 
-    def __init__(self, model_dir) :
+    def __init__(self, root_dir) :
         self.debug=True
 
         self.template = PageTemplate()
@@ -106,44 +147,88 @@ class LogVis :
         self.style = pkgutil.get_data(__name__, 'style.css').decode('ascii')
         self.script = pkgutil.get_data(__name__, 'script.js').decode('ascii')
 
-        self.nav_manage = NavManger(model_dir)
+        self.log_cache = {}
+        self.mode_key = KeyHolder('scalar')
+        self.nav_chain = setup_project_nav_chain(ProjectLookup(root_dir), self._get_log, self.mode_key)
 
+    def _get_log(self, log_path) :
+        if log_path not in self.log_cache :
+            self.log_cache[log_path] = LogReader(log_path)
+        else :
+            self.log_cache[log_path].update()
+
+        return self.log_cache[log_path]
 
     @cherrypy.expose
     @cherrypy.tools.json_in()
     @cherrypy.tools.json_out()
-    def get_log(self) :
-        key = cherrypy.request.json
-        log = self.nav_manage.get_log(key)
-        return gen_split_compare(log, key[-1])
-    
+    def epoch_log(self) :
+        info = cherrypy.request.json
+        log = self._get_log(info[0])
+        key = info[1]
+        return gen_split_compare(log, key)
+
+    @cherrypy.expose
+    @cherrypy.tools.json_in()
+    @cherrypy.tools.json_out()
+    def batch_log(self) :
+        info = cherrypy.request.json
+        log = self._get_log(info[0])
+        key = info[1]
+        return gen_split_compare(log, key, use_epochs=False)
+
+    @cherrypy.expose
+    @cherrypy.tools.json_in()
+    @cherrypy.tools.json_out()
+    def image_log(self) :
+        info = cherrypy.request.json
+        log = self._get_log(info[0])
+        key = info[1]
+
+        images_by_split = {}
+        
+        for split in log['image'] :
+            images_by_split[split] = log['image'][split][key].copy()
+
+        for split in images_by_split :
+            for batch in images_by_split[split] :
+                images_by_split[split][batch] = list(images_by_split[split][batch])
+                images_by_split[split][batch] = \
+                    [encode_image(convert_to_image_array(img)) for img in images_by_split[split][batch]]
+        
+        return images_by_split
 
     @cherrypy.expose
     @cherrypy.tools.json_in()
     @cherrypy.tools.json_out()
     def nav(self) :
-        key = cherrypy.request.json
+        request = cherrypy.request.json
         
-        result = JSONComponent()
+        response = JSONComponent()
 
-        for e in self.nav_manage.get_key(key) :
-            result.id = e
-            result.nav_path = key
-            result.next()
+        self.mode_key.value = request['mode']
 
-        return result.to_json_dict()
+        result, end = self.nav_chain.resolve(request['key'])
+
+        response.result = result
+        response.end_point = end
+
+        return response.to_json_dict()
 
 
     @cherrypy.expose
     def index(self) :
         body = HTMLComponent('body')
-        nav = body.child('div', 'nav-div', 'directory-container')
-        nav.child('div', 'exp-dir', 'directory')
-        nav.child('div', 'model-dir', 'directory')
-        nav.child('div', 'run-dir', 'directory')
-        nav.child('div', 'key-dir', 'directory')
 
-        body.child('div', 'log-div')
+        mode_div = body.child('div', 'log-type-select')
+        for url in ('epoch_log','batch_log', 'image_log') :
+            label = mode_div.child('div', None, 'log-type-button')
+            label['data-url'] = '/'+url;
+            label.append(url)
+
+        content_div = body.child('div', 'content')
+        nav = content_div.child('div', 'nav-div', 'directory-container')
+        content_div.child('div', 'log-div')
 
         return self.template.render(body)
 

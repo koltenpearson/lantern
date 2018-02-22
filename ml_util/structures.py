@@ -183,7 +183,7 @@ class Archiver :
         if store_struct.get_run_path().exists() :
             shutil.move(store_struct.get_run_path(), self.struct.get_run_path())
 
-        store_dir.rmdir()
+        shutil.rmtree(store_dir)
         store_dir.symlink_to('..') #TODO make more general?
         return True
 
@@ -272,7 +272,7 @@ class Model :
         return Description.from_note(self.struct.get_note_path())
 
     def get_log(self, run_id) :
-        return LogReader(self.struct.get_log_path(run_id))                
+        return self.struct.get_log_path(run_id)                
 
     def check_note(self) :
         notes_path = self.struct.get_note_path()
