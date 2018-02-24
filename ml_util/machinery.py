@@ -3,6 +3,7 @@
 import torch
 from torch.autograd import Variable
 from torchvision import transforms
+import numpy as np
 
 
 ############################################################################
@@ -72,60 +73,121 @@ def gradpool_train(iter_size, dataloader, model, loss, optimizer, logger) :
         logger.log_scalar_direct('loss', loss_out.data.mean())
         logger.log_batch(inputs, outputs, labels)
 
-def adversarial_train(dataloader, models, loss, optimizers, logger) :
-    g_model, d_model = models
-    g_optim, d_optim = optimizers
+class AdversarialTrainer :
 
-    #discriminator pass
-    for data in dataloader :
+    def __init__(self, loss_cutoff) :
+        self.initialized = False
+        self.loss_cutoff = loss_cutoff
+        self.mode = 'd'
 
-        #real data
-        real_inputs, original_labels = data
-        fake_seeds = g_model.generator_input(real_inputs, original_labels)
+    def train_discrimintor(self) :
 
-        real_inputs, real_labels = get_variables(inputs, torch.ones(real_inputs.shape[0]), not d_model.training, d_model.on_gpu)
+        disc_loss_sum = 0
+        disc_loss_count = 0
+        for data in self.dataloader :
 
-        if d_model.training :
-            d_optim.zero_grad()
+            #real data
+            real_inputs, original_labels = data
+            fake_seeds = self.g_model.generator_input(real_inputs, original_labels)
 
-        real_outputs = d_model(real_inputs)
-        real_loss_out = loss(real_outputs, real_labels)
+            real_inputs, real_labels = get_variables(
+                real_inputs, 
+                torch.ones(real_inputs.shape[0]).long(), 
+                not self.d_model.training, 
+                self.d_model.on_gpu
+            )
 
-        if d_model.training :
-            real_loss_out.backward()
+            if self.d_model.training :
+                self.d_optim.zero_grad()
 
-        fake_seeds, fake_labels = get_variables(fake_seeds, torch.zeros(fake_seeds.shape[0]), not g_model.training, g_model.on_gpu)
-        fake_inputs = g_model(fake_seeds).detach() #we don't want to train the generator on these so detach and save some time
-        fake_outputs = d_model(fake_inputs)
-        fake_loss_out = loss(fake_outputs, fake_labels)
+            real_outputs = self.d_model(real_inputs)
+            real_loss_out = self.loss(real_outputs, real_labels)
 
-        if d_model.training :
-            fake_loss_out.backward()
-            d_optim.step()
+            if self.d_model.training :
+                disc_loss_sum += real_loss_out.data.sum() 
+                disc_loss_count += real_loss_out.data.shape[0]
+                real_loss_out.backward()
 
-        logger.log_scalar_direct('d_loss', torch.cat((fake_loss_out.data, real_loss_out.data)).mean())
-        logger.log_batch(torch.cat((real_inputs,fake_inputs)), torch.cat((real_outputs, fake_outputs)), torch.cat((real_labels, fake_labels)), prefix='d_')
+            fake_seeds, fake_labels = get_variables(
+                fake_seeds, 
+                torch.zeros(fake_seeds.shape[0]).long(), 
+                not self.g_model.training, 
+                self.g_model.on_gpu
+            )
+            fake_inputs = self.g_model(fake_seeds).detach() #we don't want to train the generator on these so detach and save some time
+            fake_outputs = self.d_model(fake_inputs)
+            fake_loss_out = self.loss(fake_outputs, fake_labels)
 
-    #generator pass
-    for data in dataloader :
+            if self.d_model.training :
+                disc_loss_sum += fake_loss_out.data.sum()
+                disc_loss_count += real_loss_out.data.shape[0]
+                fake_loss_out.backward()
+                self.d_optim.step()
 
-        if g_model.training :
-            g_optim.zero_grad()
+            self.logger.log_scalar_direct('d_loss', torch.cat((fake_loss_out.data, real_loss_out.data)).mean())
+            self.logger.log_batch(
+                torch.cat((real_inputs,fake_inputs)), 
+                torch.cat((real_outputs, fake_outputs)), 
+                torch.cat((real_labels, fake_labels)), 
+                prefix='d_'
+            )
 
-        original_input, original_labels = data
-        g_seed = g_model.generator_input(original_input, original_labels)
-        g_seed, g_labels = get_variables(seed, torch.ones(seed.shape[0]), not g_model.training, g_model.on_gpu)
+        return disc_loss_sum/disc_loss_count
 
-        g_inputs = g_model(g_seed)
-        g_output = d_model(g_inputs)
-        g_loss_out = loss(g_output, labels)
 
-        if g_model.training :
-            g_loss_out.backward()
-            g_optim.step()
+    def train_generator(self) :
+        gen_loss_sum = 0
+        gen_loss_count = 0
 
-        logger.log_scalar_direct('g_loss', g_loss_out.data.mean())
-        logger.log_batch(g_seed, g_inputs, g_output, prefix='g_')
+        for data in self.dataloader :
+
+            if self.g_model.training :
+                self.g_optim.zero_grad()
+
+            original_input, original_labels = data
+            g_seed = self.g_model.generator_input(original_input, original_labels)
+            g_seed, g_labels = get_variables(
+                g_seed, 
+                torch.ones(g_seed.shape[0]).long(),
+                not self.g_model.training,
+                self.g_model.on_gpu
+            )
+
+            g_inputs = self.g_model(g_seed)
+            g_output = self.d_model(g_inputs)
+            g_loss_out = self.loss(g_output, g_labels)
+
+            if self.g_model.training :
+                gen_loss_sum += g_loss_out.data.sum()
+                gen_loss_count += g_loss_out.data.shape[0]
+                g_loss_out.backward()
+                self.g_optim.step()
+
+            self.logger.log_scalar_direct('g_loss', g_loss_out.data.mean())
+            self.logger.log_batch(g_seed, g_inputs, g_output, prefix='g_')
+
+        return gen_loss_sum / gen_loss_count
+
+    def __call__ (self, dataloader, models, loss, optimizers, logger) :
+        #TODO maybe I should re think trainers instead of doing this?
+        if not self.initialized :
+            self.dataloader = dataloader
+            self.g_model, self.d_model = models
+            self.loss = loss
+            self.g_optim, self.d_optim = optimizers
+            self.logger = logger
+
+        if self.mode == 'd' :
+            print('training discriminator')
+            disc_loss = self.train_discrimintor()
+            if disc_loss < self.loss_cutoff :
+                self.mode = 'g'
+        elif self.mode == 'g' :
+            print('training generator')
+            gen_loss = self.train_generator()
+            if gen_loss < self.loss_cutoff :
+                self.mode = 'd'
+
 
 
 ############################################################################

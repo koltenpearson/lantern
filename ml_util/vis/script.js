@@ -174,7 +174,7 @@ function build_image_log(id_prefix, insert_element, log_json) {
         view_control.appendChild(head);
 
         let batches = Object.keys(log_json[split]);
-        batches.sort();
+        batches.sort(function(a,b){return parseInt(a) - parseInt(b)});
 
         let range = range_array_selector(batches);
         view_control.appendChild(range);

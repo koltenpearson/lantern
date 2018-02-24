@@ -24,7 +24,7 @@ def convert_to_image_array(arr) :
 
 
 def encode_image(arr) :
-    img = Image.fromarray(arr)
+    img = Image.fromarray(np.squeeze(arr))
     png = io.BytesIO()
     img.save(png, 'png')
     encoded = base64.b64encode(png.getvalue())
