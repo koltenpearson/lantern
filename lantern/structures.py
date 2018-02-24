@@ -213,34 +213,10 @@ class Model :
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
 
-        self.get_datasets = module.get_datasets
-        self.get_model = module.get_model
+        self.init_datasets = module.init_datasets
+        self.init_model = module.init_model
+        self.train = module.train
         self.hparams = module.hparams
-
-        try :
-            self.get_loss = module.get_loss
-        except AttributeError :
-            self.get_loss = machinery.default_loss
-
-        try :
-            self.train = module.train
-        except AttributeError :
-            self.train = machinery.default_train
-
-        try :
-            self.get_optimizer = module.get_optimizer
-        except AttributeError :
-            self.get_optimizer = machinery.default_optimizer
-
-        try :
-            self.get_scheduler = module.get_scheduler
-        except AttributeError :
-            self.get_scheduler = machinery.default_scheduler
-
-        try :
-            self.register_metrics = module.register_metrics
-        except AttributeError :
-            self.register_metrics = machinery.default_register_metrics
 
 
     def _calc_next_run_id(self) :

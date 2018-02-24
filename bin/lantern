@@ -1,7 +1,11 @@
 #! /usr/bin/env python
 
 import argparse
-from ml_util.structures import Archiver, init_experiment
+from lantern.structures import Archiver, init_experiment
+
+from lantern import engine
+from lantern import structures
+from lantern.vis import server as vis
 
 def init_exp(args) :
     init_experiment(args.path)
@@ -25,6 +29,15 @@ def list_model(args) :
             print(f'\t{k}\t{models[k].name}\t{models[k].context}')
     print("")
 
+def train_experiment(args) :
+    model_info = structures.Model(args.model_dir)
+    engine.train_model(model_info, args.data_dir, args.epochs, run_id=args.id)
+
+def vis_server(args) :
+    print(__name__)
+    vis.run_server(args.root_dir, args.port)
+
+
 parser = argparse.ArgumentParser("tool for managing experiments")
 sub_add = parser.add_subparsers()
 
@@ -44,6 +57,19 @@ retrieve_parser.set_defaults(func=retrieve_model)
 list_parser = sub_add.add_parser('list', help='list stored models')
 list_parser.add_argument('path', help='model root to work from', default='.', nargs='?')
 list_parser.set_defaults(func=list_model)
+
+train_parser = sub_add.add_parser('train', help="train a model") 
+train_parser.add_argument('model_dir', help='model root directory')
+train_parser.add_argument('data_dir', help='root directory of dataset')
+train_parser.add_argument('--epochs', help='target epoch to train to', default='30', type=int)
+train_parser.add_argument('--id', help='continue the run with this id', default=-1, type=int)
+train_parser.set_defaults(func=train_experiment)
+
+vis_parser = sub_add.add_parser('vis', help='run visualization server')
+vis_parser.add_argument('root_dir', help='directory to run from', nargs='?', default='.')
+vis_parser.add_argument('-p', '--port', help='port to run on', type=int, default=3030)
+vis_parser.set_defaults(func=vis_server) 
+
 
 args = parser.parse_args()
 args.func(args)

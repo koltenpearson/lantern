@@ -1,1 +1,1 @@
-include ml_util/pkg_data/templates/*
+include lantern/pkg_data/templates/*

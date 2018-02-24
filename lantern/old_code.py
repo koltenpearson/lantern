@@ -1,22 +1,66 @@
-## some predefined machinery for working with models
+#old code that might get repurposed
 
-import torch
-from torch.autograd import Variable
-from torchvision import transforms
-import numpy as np
+#TODO I probably want to delete these
+def wrap_single(item) :
+    """convert things to a tuple of length one, if it is not an iterable"""
+    if isinstance(item, tuple) or isinstance(item, list) :
+        return item
+
+    return (item,)
+
+def unwrap_single(item) :
+    """unwrap a tuple of length 1, but otherwise pass the item through"""
+    if len(item) == 1 :
+        item = item[0]
+    return item
 
 
-############################################################################
-## trainers
+#TODO make it so that the basic trainer can be used instead of having to always define your own training loop
+def basic_trainer(model_step, dsets, batch_size, start_epoch, end_epoch, threads, logger, saver) :
 
-def get_variables(inputs, labels, volatile, on_gpu) :
-    """utility function for correctly creating variables)"""
-    if on_gpu :
-        inputs, labels = Variable(inputs, volatile=volatile).cuda(), Variable(labels, volatile=volatile).cuda()
-    else :
-        inputs, labels = Variable(inputs, volatile=volatile), Variable(labels, volatile=volatile)
+    train_loader = DataLoader(dsets['train'],
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=threads)
+    if 'val' in dsets :
+        val_loader = DataLoader(dsets['val'],
+                batch_size=batch_size,
+                shuffle=False,
+                num_workers=threads)
+    if 'test' in dsets :
+        test_loader = DataLoader(dsets['test'],
+                batch_size=batch_size,
+                shuffle=False, 
+                num_workers=threads)
 
-    return inputs, labels
+    print("starting training")
+    while last_epoch < target_epoch :
+        last_epoch += 1
+
+        for m in model : m.train()
+        logger.log_epoch_start('train')
+        model_step(train_loader, logger) 
+        model_info.train(train_loader, unwrap_single(model), unwrap_single(loss), unwrap_single(optimizer), logger)
+
+        for m in model : m.eval()
+        if 'val' in dsets :
+            logger.log_epoch_start('val')
+            model_info.train(val_loader, unwrap_single(model), unwrap_single(loss), unwrap_single(optimizer), logger)
+
+        if scheduler[0] is not None :
+            for s in scheduler : s.step()
+
+        saver.save(last_epoch)
+        logger.log_completion()
+
+        print(f"finished epoch {last_epoch}")
+
+
+    if 'test' in dsets :
+
+        logger.log_epoch_start('test')
+        model_step(test_loader, unwrap_single(model), unwrap_single(loss), unwrap_single(optimizer), logger)
+        logger.log_completion()
 
 
 def basic_train(dataloader, model, loss, optimizer, logger) :
@@ -42,6 +86,8 @@ def basic_train(dataloader, model, loss, optimizer, logger) :
         
         logger.log_scalar_direct('loss', loss_out.data.mean())
         logger.log_batch(inputs, outputs, labels)
+
+
 
 def gen_gradpool_train(iter_size) :
     return lambda *args : gradpool_train(iter_size, *args)
@@ -72,6 +118,7 @@ def gradpool_train(iter_size, dataloader, model, loss, optimizer, logger) :
 
         logger.log_scalar_direct('loss', loss_out.data.mean())
         logger.log_batch(inputs, outputs, labels)
+
 
 class AdversarialTrainer :
 
@@ -189,49 +236,4 @@ class AdversarialTrainer :
                 self.mode = 'd'
 
 
-
-############################################################################
-## metrics
-
-def accuracy_metric(outputs, labels) :
-    _, predicted = torch.max(outputs, 1)
-    correct = (predicted == labels).sum()
-    return correct/labels.size(0)
-
-def l2_distance_metric(outputs, labels) :
-    distance = (outputs - labels)**2
-    distance = distance.sum(2)
-    distance = distance.sqrt()
-    
-    return distance.sum()/labels.size(0)
-
-############################################################################
-## preprocessing
-
-imagenet_mean = [0.485, 0.456, 0.406]
-imagenet_std = [0.229, 0.224, 0.225]
-
-imagenet_train_preproc = transforms.Compose([
-    transforms.Resize(256),
-    transforms.RandomCrop(224),
-    transforms.RandomHorizontalFlip(),
-    transforms.ToTensor(),
-    transforms.Normalize(imagenet_mean, imagenet_std)
-    ])
-
-imagenet_eval_preproc = transforms.Compose([
-    transforms.Resize(256),
-    transforms.CenterCrop(224),
-    transforms.ToTensor(),
-    transforms.Normalize(imagenet_mean, imagenet_std)
-    ])
-
-############################################################################
-## defaults
-
-default_train = basic_train
-default_scheduler = lambda x, y : None
-default_loss = lambda : torch.nn.CrossEntropyLoss()
-default_optimizer = lambda x : torch.optim.Adam(x.parameters())
-default_register_metrics = lambda x : None
 

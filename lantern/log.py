@@ -13,10 +13,6 @@ class Logger :
         self.buffer = []
         self.max_buf_size = max_buf_size
 
-        #set to true if you want to handle a multiheaded network
-        self.unpack_outputs = False
-        self.unpack_labels = False
-
         self.model = model
         self.scalar_metrics = {}
         self.tensor_metrics = {}
@@ -36,10 +32,8 @@ class Logger :
         self.buffer.clear()
         outfile.close()
 
-    def log_batch(self, inputs, outputs, labels, prefix='') :
-        self.log_tensors(self.model, prefix)
-        self.log_images(inputs, outputs, labels, prefix)
-        self.log_scalars(outputs, labels, prefix)
+    def batch_end(self) :
+        """call at the end of a batch, used to update interal counters"""
         self.batch_count += 1
 
     def add_to_buffer(self, entry) :
@@ -64,72 +58,19 @@ class Logger :
         self.add_to_buffer(entry)
         self.flush()
 
-    def _proc_outputs_labels(self, outputs, labels) :
-        if self.unpack_outputs :
-            outputs = tuple([o.data for o in outputs])
-        else :
-            outputs = outputs.data
-        if self.unpack_labels :
-            labels = tuple([l.data for l in labels])
-        else :
-            labels = labels.data
-        return outputs, labels
-
-    def log_scalar_direct(self, key, scalar) :
+    def log_scalar(self, key, scalar) :
         entry = {'type' : 'scalar', 'batch_count' : self.batch_count, 'key' : key, 'value' : scalar}
         self.add_to_buffer(entry)
 
-    def log_scalars(self, outputs, labels, prefix) :
-        outputs, labels = self._proc_outputs_labels(outputs, labels)
+    def log_tensors(self, key, tensor) :
+        entry = {'type' : 'tensor', 'batch_count' : self.batch_count, 'key' : key , 'value' : tensor.numpy()}
+        self.add_to_buffer(entry)
 
-        for k, (m, f) in self.scalar_metrics.items() :
-            if k[:len(prefix)] != prefix :
-                continue
-
-            if (f is None and self.batch_count == 0) or (f is not None and self.batch_count % f == 0) :
-                entry = {'type' : 'scalar', 'batch_count' : self.batch_count, 'key' : k}
-                entry['value'] = m(outputs, labels)
-                self.add_to_buffer(entry)
-
-
-    def log_tensors(self, model, prefix) :
-        for k, (m, f, e) in self.tensor_metrics.items() :
-            if k[:len(prefix)] != prefix :
-                continue
-
-            if (f is None and self.batch_count == 0) or (f is not None and self.batch_count % f == 0) :
-                if model[0].training or e :
-                    entry = {'type' : 'tensor', 'batch_count' : self.batch_count, 'key' : k }
-                    entry['value'] = m(unwrap_single(model)).numpy()
-                    self.add_to_buffer(entry)
-
-    def log_images(self, inputs, outputs, labels, prefix) :
-        outputs, labels = self._proc_outputs_labels(outputs, labels)
-        inputs = inputs.data
-        #TODO add check for correct input types?
-
-        for k, (m, f) in self.image_metrics.items() :
-            if k[:len(prefix)] != prefix :
-                continue
-
-            if (f is None and self.batch_count == 0) or (f is not None and self.batch_count % f == 0) :
-                entry = {'type' : 'image', 'batch_count' : self.batch_count, 'key' : k}
-                entry['value'] = [d.numpy() for d in m(inputs, outputs, labels)]
-                self.add_to_buffer(entry)
+    def log_images(self, key, images) :
+            entry = {'type' : 'image', 'batch_count' : self.batch_count, 'key' : key}
+            entry['value'] = [i.numpy() for i in images]
+            self.add_to_buffer(entry)
     
-
-    #metric should take in (outputs, labels) and return a scalar number
-    def register_scalar_metric(self, key, metric, freq=1) :
-        self.scalar_metrics[key] = (metric, freq)
-
-    #metric should take a model, and return a tensor
-    def register_tensor_metric(self, key, metric, freq=None, on_eval=False) :
-        self.tensor_metrics[key] = (metric, freq, on_eval)
-
-    #metric should take in (inputs, outputs, labels), give back a tuple of tensors of shape 3xWxH
-    def register_image_metric(self, key, metric, freq=None) :
-        self.image_metrics[key] = (metric, freq)
-
 
 def recursive_default_dict() :
     result = defaultdict(recursive_default_dict)

@@ -6,7 +6,7 @@
 ## these may be change by outside tools but
 # they will be changed before any other method is called
 # use the dict for things like learning rates and other 
-# values you might want to change in a run
+# values you might want a tool to be able to automatically change
 
 hparams = {
         'batch_size' : 128, #this one always needs to be defined
@@ -20,7 +20,7 @@ hparams = {
 # to turn it into datasets for training and validation
 # the datasets should be subclasses of torch.utils.data.Dataset
 
-def get_datasets(data_dir) :
+def init_datasets(data_dir) :
     #not all of these need to be included in the dict, though train is necessary
     return {'train' : None, 'val' : None, 'test' : None}
 
