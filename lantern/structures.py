@@ -3,7 +3,6 @@
 from pathlib import Path
 import importlib
 import json
-from . import machinery
 import pkgutil
 import shutil
 
@@ -16,6 +15,7 @@ RUN_DIR = 'runs'
 CHECKPOINT_NAME = 'state.pt'
 LOG_NAME = 'log.bin'
 ARCHIVE_DIR = '.archive'
+PRETRAINED_PATH = 'pretrained'
 
 class Structure :
 
@@ -29,6 +29,9 @@ class Structure :
 
     def get_model_def_path(self) :
         return self.root / MODEL_DEF_NAME
+
+    def get_pretrained_path(self) :
+        return self.root/PRETRAINED_PATH
 
     def get_log_path(self, rid) :
         return self.run_dir / str(rid) / LOG_NAME
@@ -205,6 +208,7 @@ class Model :
 
         self.get_log_path = self.struct.get_log_path
         self.get_checkpoint_path = self.struct.get_checkpoint_path
+        self.get_pretrained_path = self.struct.get_pretrained_path
 
         spec = importlib.util.spec_from_file_location(
                     'model_def', 
@@ -228,11 +232,14 @@ class Model :
             if cid < int(p.parts[-1]) :
                 cid = int(p.parts[-1])
 
+        if not self.struct.get_checkpoint_path(cid).exists() :
+            return cid
+
         return cid + 1
 
     def get_new_run(self) :
         result = self.next_rid
-        self.struct.get_run_path(result).mkdir(parents=True)
+        self.struct.get_run_path(result).mkdir(parents=True, exist_ok=True)
 
         self.next_rid += 1
         return result

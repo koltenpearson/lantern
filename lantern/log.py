@@ -4,16 +4,14 @@ import msgpack_numpy
 msgpack_numpy.patch()
 
 from collections import defaultdict
-from .util import unwrap_single
 
 class Logger :
 
-    def __init__(self, logdir, model, max_buf_size=50) :
+    def __init__(self, logdir, max_buf_size=50) :
         self.path = Path(logdir)
         self.buffer = []
         self.max_buf_size = max_buf_size
 
-        self.model = model
         self.scalar_metrics = {}
         self.tensor_metrics = {}
         self.image_metrics = {}

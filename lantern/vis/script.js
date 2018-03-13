@@ -152,7 +152,6 @@ function build_scalar_log(id_prefix, insert_element, log_json) {
 
 function build_image_log(id_prefix, insert_element, log_json) {
     var viewer_id = get_id(id_prefix, ['image', 'viewer']);
-    console.log(log_json);
 
     var frag = document.createDocumentFragment();
     var viewer = document.createElement('div');
@@ -160,8 +159,11 @@ function build_image_log(id_prefix, insert_element, log_json) {
     viewer.className = 'image-viewer';
     frag.appendChild(viewer);
 
-    var splits = Object.keys(log_json);
+    var splits = Object.keys(log_json['batches']);
     splits.sort();
+
+    var log_name = log_json['log']
+    var key_name = log_json['key']
 
     for (var i =0; i < splits.length; i++) {
         let split = splits[i];
@@ -173,7 +175,7 @@ function build_image_log(id_prefix, insert_element, log_json) {
         head.innerText = split;
         view_control.appendChild(head);
 
-        let batches = Object.keys(log_json[split]);
+        let batches = log_json['batches'][split];
         batches.sort(function(a,b){return parseInt(a) - parseInt(b)});
 
         let range = range_array_selector(batches);
@@ -187,18 +189,42 @@ function build_image_log(id_prefix, insert_element, log_json) {
         let image_cont = document.createElement('div');
         image_cont.className = 'image-viewer-container';
 
-        for (let j = 0; j < log_json[split][batches[range.value]].length; j++) {
-            image_cont.appendChild(encoded_png(log_json[split][batches[range.value]][j]));
-        }
-
+        ajaj({
+            url :'/encoded_image',
+            body : {
+                'log' : log_name, 
+                'key' : key_name, 
+                'split' : split, 
+                'batch' : batches[batches.length-1]
+            },
+            success : function (encoded_imgs) {
+                for (let j = 0; j < encoded_imgs.length; j++) {
+                    image_cont.appendChild(encoded_png(encoded_imgs[j]));
+                }
+            },
+            failure : function () {}
+        });
 
         range.oninput = function() {
             epoch_label.innerText = batches[range.value];
-            remove_all_children(image_cont);
 
-            for (let j = 0; j < log_json[split][batches[range.value]].length; j++) {
-                image_cont.appendChild(encoded_png(log_json[split][batches[range.value]][j]));
-            }
+            ajaj({
+                url :'/encoded_image',
+                body : {
+                    'log' : log_name, 
+                    'key' : key_name, 
+                    'split' : split, 
+                    'batch' : batches[range.value]
+                },
+                success : function (encoded_imgs) {
+                    remove_all_children(image_cont);
+                    for (let j = 0; j < encoded_imgs.length; j++) {
+                        image_cont.appendChild(encoded_png(encoded_imgs[j]));
+                    }
+                },
+                failure : function () {}
+            });
+
         };
 
         viewer.appendChild(view_control);
@@ -288,6 +314,12 @@ document.addEventListener("DOMContentLoaded", function () {
         log_type_buttons[i].onclick = function () {
             expand_nav([]);
             log_url = this.dataset.url;
+
+            var current_selection = document.getElementsByClassName('selected-log-type');
+            if (current_selection.length > 0) {
+                current_selection[0].classList.remove('selected-log-type');
+            }
+            this.classList.add('selected-log-type');
         }
     }
 

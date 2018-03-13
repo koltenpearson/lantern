@@ -22,7 +22,6 @@ def convert_to_image_array(arr) :
     img = ((arr -i_min)/(i_max-i_min)) * 255
     return img.astype(np.uint8).transpose((1,2,0))
 
-
 def encode_image(arr) :
     img = Image.fromarray(np.squeeze(arr))
     png = io.BytesIO()
@@ -43,7 +42,7 @@ def gen_split_compare(log, key, use_epochs=True) :
 
     max_epochs = 0
     for l in working_logs.values() :
-        if max(l) > max_epochs :
+        if len(l) > 0 and max(l) > max_epochs :
             max_epochs = max(l)
     
     for split,l in working_logs.items() :
@@ -185,18 +184,28 @@ class LogVis :
         log = self._get_log(info[0])
         key = info[1]
 
-        images_by_split = {}
+        batches_by_split = {}
         
         for split in log['image'] :
-            images_by_split[split] = log['image'][split][key].copy()
+            batches_by_split[split] = list(log['image'][split][key])
 
-        for split in images_by_split :
-            for batch in images_by_split[split] :
-                images_by_split[split][batch] = list(images_by_split[split][batch])
-                images_by_split[split][batch] = \
-                    [encode_image(convert_to_image_array(img)) for img in images_by_split[split][batch]]
-        
-        return images_by_split
+        response = {'log' : info[0], 'key' : key, 'batches' : batches_by_split}
+
+        return response
+
+    @cherrypy.expose
+    @cherrypy.tools.json_in()
+    @cherrypy.tools.json_out()
+    def encoded_image(self) :
+        info = cherrypy.request.json
+        log = self._get_log(info['log'])
+        split = info['split']
+        key = info['key']
+        batch = info['batch']
+        results = []
+        for img in  log['image'][split][key][batch] :
+            results.append(encode_image(convert_to_image_array(img)))
+        return results
 
     @cherrypy.expose
     @cherrypy.tools.json_in()

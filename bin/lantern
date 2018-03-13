@@ -5,7 +5,9 @@ from lantern.structures import Archiver, init_experiment
 
 from lantern import engine
 from lantern import structures
-from lantern.vis import server as vis
+from lantern.vis import server as vis_server
+from lantern.vis import data_server 
+from lantern.save import Saver
 
 def init_exp(args) :
     init_experiment(args.path)
@@ -29,13 +31,24 @@ def list_model(args) :
             print(f'\t{k}\t{models[k].name}\t{models[k].context}')
     print("")
 
+def save_weights(args) :
+    model = structures.Model(args.model_dir)
+    if args.save_name is None :
+        args.save_name = args.key
+    model.get_pretrained_path().mkdir(exist_ok=True)
+    args.save_name = model.get_pretrained_path() / args.save_name
+    Saver.save_model_dict(model.get_checkpoint_path(args.run_id), args.key, args.save_name)
+
 def train_experiment(args) :
     model_info = structures.Model(args.model_dir)
     engine.train_model(model_info, args.data_dir, args.epochs, run_id=args.id)
 
-def vis_server(args) :
-    print(__name__)
-    vis.run_server(args.root_dir, args.port)
+def run_vis_server(args) :
+    vis_server.run_server(args.root_dir, args.port)
+
+
+def run_data_vis_server(args) :
+    data_server.run_server(args.root_dir, args.data_dir, args.port)
 
 
 parser = argparse.ArgumentParser("tool for managing experiments")
@@ -58,6 +71,14 @@ list_parser = sub_add.add_parser('list', help='list stored models')
 list_parser.add_argument('path', help='model root to work from', default='.', nargs='?')
 list_parser.set_defaults(func=list_model)
 
+save_weights_parser = sub_add.add_parser('save_weights', help="save weights of run to load pretrained later") 
+save_weights_parser.add_argument('model_dir', help='model root directory')
+save_weights_parser.add_argument('run_id', help='id to save weights from', type=int)
+save_weights_parser.add_argument('key', help='key used to save the models weights in the checkpoint')
+save_weights_parser.add_argument('save_name', help='name to write out', default=None , nargs='?')
+save_weights_parser.set_defaults(func=save_weights)
+
+
 train_parser = sub_add.add_parser('train', help="train a model") 
 train_parser.add_argument('model_dir', help='model root directory')
 train_parser.add_argument('data_dir', help='root directory of dataset')
@@ -68,7 +89,14 @@ train_parser.set_defaults(func=train_experiment)
 vis_parser = sub_add.add_parser('vis', help='run visualization server')
 vis_parser.add_argument('root_dir', help='directory to run from', nargs='?', default='.')
 vis_parser.add_argument('-p', '--port', help='port to run on', type=int, default=3030)
-vis_parser.set_defaults(func=vis_server) 
+vis_parser.set_defaults(func=run_vis_server) 
+
+data_vis_parser = sub_add.add_parser('data_vis', help='run data visualization server')
+data_vis_parser.add_argument('root_dir', help='directory to run from')
+data_vis_parser.add_argument('data_dir', help='directory of dataset')
+data_vis_parser.add_argument('-p', '--port', help='port to run on', type=int, default=3030)
+data_vis_parser.set_defaults(func=run_data_vis_server) 
+
 
 
 args = parser.parse_args()

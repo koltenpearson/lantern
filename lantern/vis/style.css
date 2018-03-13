@@ -4,6 +4,23 @@
     align-items : flex-start;
 }
 
+#log-type-select {
+    /*background-color : #AAAAAA;*/
+    display : flex;
+    align-items : flex-start;
+}
+
+.log-type-button {
+    background-color : #AAAAAA;
+    padding : 0.5em;
+    margin : 0.3em;
+
+}
+
+.selected-log-type {
+    background-color : #444444;
+}
+
 .directory {
     /*background-color : #AAAAAA;*/
     padding : 0.5em;

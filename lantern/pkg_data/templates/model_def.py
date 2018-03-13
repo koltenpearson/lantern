@@ -3,77 +3,43 @@
 ############################################################################
 ## hyperparameters
 
-## these may be change by outside tools but
+## these may be changed by outside tools but
 # they will be changed before any other method is called
 # use the dict for things like learning rates and other 
 # values you might want a tool to be able to automatically change
 
-hparams = {
-        'batch_size' : 128, #this one always needs to be defined
-        }
-
+hparams = {}
 
 ############################################################################
 ## dataset 
 
-## this function is given a directory passed from the user, and needs
-# to turn it into datasets for training and validation
-# the datasets should be subclasses of torch.utils.data.Dataset
+## this function is given a directory passed from the user, to be turned
+# into datasets
 
 def init_datasets(data_dir) :
-    #not all of these need to be included in the dict, though train is necessary
-    return {'train' : None, 'val' : None, 'test' : None}
-
-############################################################################
-## Model 
-
-##should return a subclass of torch.nn.Module
-
-def get_model() :
+    # while you should keep your own state internally this method can return
+    # a subclass of torch.utils.data.Datset, or a dictionary of datasets
+    # which can be used by lantern to create visualizations
     return None
 
-#############################################################################
-## Training
-
-## returns the loss function, subclass of torch.nn.Module, will use
-# a default classification loss if not defined
-
-#def get_loss() :
-#    return None
-
-## passes in the model and returns an optimizer, will use
-# a default optimizer with sane parameters if not defined
-
-#def get_optimizer(model) :
-#    return None
-
-## pass in the optimizer, and and int marking the last epoch
-# should return a scheduler following the ones found in
-# torch.optim.lr_scheduler for adjusting the learning rate during training
-# the scheduler initialized that that last_epoch was the last epoch in its 
-# schedule.
-
-#def get_scheduler(optimizer, last_epoch) :
-#    return None
-
-## The default train function should work for most cases
-# only overwrite this if you study the default implemention
-# and copy its general behavior
-
-#def train (dataloader, model, loss, optimizer, logger) :
-#    return None
-
 ############################################################################
-## Logging
+## model 
 
-## passes in a Logger object, you can register metrics with the function
-# register_metric(key, func(outputs, labels)) the func passed in should return
-# a scalar. The logger will write out the result for every batch. See Logger 
-# source for more functionality
+## This function should be used to initialize everything internally
+# it will always be called before train, and gives you a Saver
+# which should be set up with your parameters
+# be sure to remember to convert things with .cuda() if you are using the gpu
+def init_model(saver) :
+    pass
 
-#def register_metrics(logger) :
-#    logger.register_metric('accuracy', ml_util.accuracy_metric)
+#############################################################################
+## training
 
-
-
+## this function should contain your training loop
+#start_epoch is the what epoch to start from
+#target_epoch is how far to train before stopping
+#logger is a Logger initialized to the correct directory
+#saver is a Saver, same that was passed to model_init
+def train(start_epoch, target_epoch, logger, saver) :
+    pass
 
