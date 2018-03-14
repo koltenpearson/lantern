@@ -1,1 +1,3 @@
 include lantern/pkg_data/templates/*
+include lantern/vis/script.js
+include lantern/vis/style.css
