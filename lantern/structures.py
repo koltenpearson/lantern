@@ -222,6 +222,11 @@ class Model :
         self.train = module.train
         self.hparams = module.hparams
 
+        try :
+            self.run_inference = module.run_inference
+        except AttributeError :
+            pass
+
 
     def _calc_next_run_id(self) :
         cid = 0

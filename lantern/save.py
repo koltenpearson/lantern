@@ -1,6 +1,17 @@
 from pathlib import Path
 import torch
 
+import msgpack
+import msgpack_numpy
+msgpack_numpy.patch()
+
+#TODO finish this later
+class LogitSaver :
+
+    def __init__(self, output_path) :
+        pass
+
+
 
 #TODO add in support for saving state of RNG as well
 class Saver :

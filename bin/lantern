@@ -43,6 +43,11 @@ def train_experiment(args) :
     model_info = structures.Model(args.model_dir)
     engine.train_model(model_info, args.data_dir, args.epochs, run_id=args.id)
 
+def infer_model(args) :
+    model_info = structures.Model(args.model_dir)
+    engine.run_inference(model_info, args.id, args.data_dir)
+
+
 def run_vis_server(args) :
     vis_server.run_server(args.root_dir, args.port)
 
@@ -85,6 +90,14 @@ train_parser.add_argument('data_dir', help='root directory of dataset')
 train_parser.add_argument('--epochs', help='target epoch to train to', default='30', type=int)
 train_parser.add_argument('--id', help='continue the run with this id', default=-1, type=int)
 train_parser.set_defaults(func=train_experiment)
+
+infer_parser = sub_add.add_parser('infer', help="infer a model") 
+infer_parser.add_argument('model_dir', help='model root directory')
+infer_parser.add_argument('id', help='restore from this id\'s latest checkpoint', type=int)
+infer_parser.add_argument('data_dir', help='root directory of data, passed to run_inference')
+infer_parser.set_defaults(func=infer_model)
+
+
 
 vis_parser = sub_add.add_parser('vis', help='run visualization server')
 vis_parser.add_argument('root_dir', help='directory to run from', nargs='?', default='.')

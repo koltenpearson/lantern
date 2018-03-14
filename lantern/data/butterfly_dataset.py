@@ -290,7 +290,7 @@ class SegmentationDataset(ButterflyDataset):
         mask_path = os.path.splitext(path)[0] + '.npy'
         if os.path.exists(mask_path):
             #masks = np.load(mask_path)
-            masks = np.load(mask_path).astype('uint8') 
+            masks = np.load(mask_path, encoding='latin1').astype('uint8') 
         else:
             #masks = np.zeros((9, img.size[1], img.size[0]), 'float32')
             masks = np.zeros((9, img.size[1], img.size[0]), 'uint8')
