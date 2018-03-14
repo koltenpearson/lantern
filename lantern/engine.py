@@ -14,15 +14,15 @@ def run_inference(model, run_id, data_dir) :
 
     if saver.checkpoint_exists() :
         last_epoch = saver.restore()
-        print(f"restoring from checkpoint, epoch {last_epoch + 1}")
+        print(f"restoring from checkpoint, epoch {last_epoch}")
     else :
         print(f"no checkpoint exists for {model.root}:{run_id}")
         return False
 
-    try :
-        model.run_inference(data_dir)
-    except AttributeError :
-        print(f"run_inference method not defined")
+    # try :
+    model.run_inference(data_dir)
+    # except AttributeError :
+        # print(f"run_inference method not defined")
 
     return True
 
