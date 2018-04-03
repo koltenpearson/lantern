@@ -1,6 +1,6 @@
 import cherrypy
 from .build import HTMLComponent, JSONComponent, PageTemplate
-from ..structures import ProjectLookup
+from ..model import Model
 from ..log import LogReader
 from pathlib import Path
 import pkgutil
@@ -73,58 +73,69 @@ def gen_split_compare(log, key, use_epochs=True) :
     chart.data.labels = list(range(max_epochs+1))
 
     chart.options.responsive = False
+    chart.log_type='scalar'
 
     return chart.to_json_dict()
 
-class NavLink :
 
-    def __init__(self) :
-        self.link = None
-        self.coupling = None
-        self.list_keys = lambda link : None
-        self.follow_key = lambda link, key : None
+def find_models_under_dir(dir_to_search, acc=None) :
+    dir_to_search = Path(dir_to_search)
+    if acc is None :
+        acc = []
 
-    def resolve(self, keys) :
-        if self.coupling is None :
-            return self.link, True
+    for f in dir_to_search.iterdir() :
+        if f.is_dir() :
+            if Model.load_if_exists(f) is not None :
+                acc.append(f)
+            elif not f.is_symlink():
+                find_models_under_dir(f, acc=acc)
 
-        if len(keys) == 0 :
-            return self.list_keys(self.link), False
-
-        self.coupling.link = self.follow_key(self.link, keys[0])
-        return self.coupling.resolve(keys[1:])
+    return acc
 
 
-class KeyHolder :
+def condense_tree(tree, key_join='/') :
 
-    def __init__(self, value) :
-        self.key = value
+    changes = []
+    for key in tree :
+        try :
+            condense_tree(tree[key])
 
-def setup_project_nav_chain(p_lookup, log_retrieve, mode_key) :
-    head = NavLink()
-    head.link = p_lookup
-    head.list_keys = lambda pl : [{'id':name} for name in sorted(pl.list_archives())]
-    head.follow_key = lambda pl, key : pl.get_archiver(key)
+            if len(tree[key]) == 1 :
+                changes.append((
+                    key, 
+                    next(iter(tree[key].keys()))
+                ))
 
-    tail = NavLink()
-    tail.list_keys = lambda arch : [{'id' : name} for name in sorted(arch.list_models(), reverse=True)]
-    tail.follow_key = lambda arch, key : arch.get_model(key)
-    head.coupling = tail
+        except TypeError :
+            continue
 
-    tail = NavLink()
-    tail.list_keys = lambda md : [{'id' : name} for name in sorted(md.list_runs(), reverse=True)]
-    tail.follow_key = lambda md, key : log_retrieve(md.get_log(key))
-    head.coupling.coupling = tail
+    for old_key, child_key in changes :
+        tree[key_join.join((old_key, child_key))] = tree[old_key][child_key]
+        del tree[old_key]
 
-    tail = NavLink()
-    tail.list_keys = lambda l : [{'id' : name} for name in l[mode_key.value]['train']]
-    tail.follow_key = lambda l, key : (str(l.log_file), key)
-    head.coupling.coupling.coupling = tail
 
-    head.coupling.coupling.coupling.coupling = NavLink()
+def create_model_lookup_tree(dir_to_search) :
+    dir_to_search = Path(dir_to_search)
+    models = find_models_under_dir(dir_to_search)
 
-    return head
+    cut_length = len(dir_to_search.resolve().parts)
 
+    tree = {}
+
+    for m in models :
+        m = m.resolve()
+
+        leaf = tree
+        for p in m.parts[cut_length:-1] :
+            if p not in leaf :
+                leaf[p] = {}
+            leaf = leaf[p]
+
+        leaf[m.parts[-1]] = Model(m)
+
+    condense_tree(tree)
+
+    return tree
 
 
 ##########################################################################
@@ -147,10 +158,15 @@ class LogVis :
         self.script = pkgutil.get_data(__name__, 'script.js').decode('ascii')
 
         self.log_cache = {}
-        self.mode_key = KeyHolder('scalar')
-        self.nav_chain = setup_project_nav_chain(ProjectLookup(root_dir), self._get_log, self.mode_key)
+        self.model_tree = create_model_lookup_tree(root_dir)
+        self.log_mode_map = {
+                'scalar' : '/epoch_log',
+                'image' : '/image_log'
+        }
+
 
     def _get_log(self, log_path) :
+        log_path = str(log_path)
         if log_path not in self.log_cache :
             self.log_cache[log_path] = LogReader(log_path)
         else :
@@ -207,20 +223,68 @@ class LogVis :
             results.append(encode_image(convert_to_image_array(img)))
         return results
 
+
+    def _resolve_nav(self, nav_path) :
+        nav_path = iter(nav_path)
+        response = JSONComponent()
+        response.end_point = False
+
+        selected = self.model_tree
+
+        while True :
+            try :
+                selected = selected[next(nav_path)]
+            except StopIteration :
+                for k in sorted(selected.keys()) :
+                    response.keys.id = k
+                    response.keys.next()
+                return response
+
+            if isinstance(selected, Model) :
+                break
+
+        try :
+            run_id = next(nav_path)
+            log_path = selected.get_log_path(run_id)
+            selected = self._get_log(log_path)
+        except StopIteration :
+            for k in sorted(selected.list_runs()) :
+                response.keys.id = k
+                response.keys.next()
+            return response
+            
+        try :
+            log_type = next(nav_path)
+            selected = selected[log_type]
+        except StopIteration :
+            for k in sorted(list(selected)) :
+                response.keys.id = k
+                response.keys.next()
+            return response
+
+        try :
+            response.body = [str(log_path), next(nav_path)]
+            response.url = self.log_mode_map[log_type]
+            response.end_point = True
+            return response
+        except StopIteration :
+            keyset = set()
+            for split in selected :
+                keyset.update(selected[split])
+            for k in sorted(keyset) :
+                response.keys.id = k
+                response.keys.next()
+            return response
+
+
     @cherrypy.expose
     @cherrypy.tools.json_in()
     @cherrypy.tools.json_out()
     def nav(self) :
         request = cherrypy.request.json
-        
-        response = JSONComponent()
+        nav_path = request['key']
 
-        self.mode_key.value = request['mode']
-
-        result, end = self.nav_chain.resolve(request['key'])
-
-        response.result = result
-        response.end_point = end
+        response = self._resolve_nav(nav_path)
 
         return response.to_json_dict()
 
@@ -266,6 +330,5 @@ def run_server(root_dir, port) :
 
     cherrypy.engine.start()
     cherrypy.engine.block()
-
 
 

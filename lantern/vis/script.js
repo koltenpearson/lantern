@@ -66,21 +66,10 @@ function get_id(prefix, key, suffix) {
 ////////////////////////////////////////////////////////////////////////////
 //page actions
 
-var log_url = '/epoch_log'
-
-//TODO not hardcode these? 
-var log_url_map = {
-    '/epoch_log' : build_scalar_log,
-    '/batch_log' : build_scalar_log,
-    '/image_log' : build_image_log,
+var log_type_map = {
+    'scalar' : build_scalar_log,
+    'image' : build_image_log,
 }
-
-var log_mode_map = {
-    '/epoch_log' : 'scalar',
-    '/batch_log' : 'scalar',
-    '/image_log' : 'image',
-}
-
 
 function append_log(nav_path, nav_info) {
 
@@ -90,10 +79,10 @@ function append_log(nav_path, nav_info) {
     var log_div = document.getElementById('log-div');
 
     ajaj({
-        url : log_url,
-        body : nav_info,
+        url : nav_info.url,
+        body : nav_info.body,
         success : function(log_json) {
-            log_url_map[log_url](get_id('log', nav_path), log_insert, log_json);
+            log_type_map[log_json.log_type](get_id('log', nav_path), log_insert, log_json);
             log_div.appendChild(log_cont);
         },
         failure : function(){}
@@ -107,10 +96,10 @@ function expand_nav(nav_path) {
 
     ajaj({
         url : '/nav',
-        body : {'key' : nav_path, 'mode' : log_mode_map[log_url]},
+        body : {'key' : nav_path},
         success : function(results) {
             if (results['end_point']) {
-                append_log(nav_path, results.result)
+                append_log(nav_path, results)
                 return
             }
 
@@ -124,8 +113,13 @@ function expand_nav(nav_path) {
                 nav_div.appendChild(build_nav_container());
             }
 
-            for (var i = 0; i < results.result.length; i++) {
-                nav_div.children[next_nav_index].appendChild(build_sub_nav_div(results['result'][i], nav_path));
+            if (results.keys === undefined) {
+                //TODO display empty message
+
+            } else {
+                for (var i = 0; i < results.keys.length; i++) {
+                    nav_div.children[next_nav_index].appendChild(build_sub_nav_div(results['keys'][i], nav_path));
+                }
             }
 
         },
