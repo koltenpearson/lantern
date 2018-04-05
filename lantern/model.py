@@ -77,7 +77,7 @@ class Model :
         try :
             exec(code, module.__dict__)
         except :
-            raise ModelLoadError()
+            raise ModelLoadError(f"error while loading model_def.py for {self.name}")
 
         self.init_datasets = module.init_datasets
         self.init_model = module.init_model
