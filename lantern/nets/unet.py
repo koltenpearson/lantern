@@ -5,9 +5,10 @@ from torch import nn
 import torch.nn.functional as func
 
 
-class UNet(nn.module) :
+class UNet(nn.Module) :
 
     def __init__(self, in_depth=3, out_depth=2, padding=False) :
+        super().__init__()
         relu = nn.ReLU(True)
         self.crop = not padding
 
@@ -35,7 +36,7 @@ class UNet(nn.module) :
         self.down4 = nn.Sequential(
             nn.MaxPool2d(2),
             nn.Conv2d(256,512, kernel_size=3, stride=1, padding=pad), relu,
-            nn.Conv2d(256,512, kernel_size=3, stride=1, padding=pad), relu,
+            nn.Conv2d(512,512, kernel_size=3, stride=1, padding=pad), relu,
         )
 
         self.u = nn.Sequential(
@@ -63,7 +64,7 @@ class UNet(nn.module) :
             nn.ConvTranspose2d(128,64, kernel_size=2, stride=2, padding=0)
         )
 
-        self.up2 = nn.Sequential(
+        self.up1 = nn.Sequential(
             nn.Conv2d(128,64, kernel_size=3, stride=1, padding=pad), relu,
             nn.Conv2d(64,64, kernel_size=3, stride=1, padding=pad), relu,
             nn.Conv2d(64,out_depth, kernel_size=1, stride=1, padding=0)

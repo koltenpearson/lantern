@@ -82,6 +82,8 @@ def find_models_under_dir(dir_to_search, acc=None) :
     dir_to_search = Path(dir_to_search)
     if acc is None :
         acc = []
+        if Model.load_if_exists(dir_to_search) is not None :
+            acc.append(dir_to_search)
 
     for f in dir_to_search.iterdir() :
         if f.is_dir() :
